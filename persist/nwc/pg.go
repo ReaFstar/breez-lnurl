@@ -3,6 +3,8 @@ package persist
 import (
 	"context"
 	"encoding/hex"
+	"errors"
+	"fmt"
 	"time"
 
 	"github.com/breez/breez-lnurl/constant"
@@ -30,16 +32,16 @@ func (s *PgStore) Set(ctx context.Context, webhook Webhook) error {
 		return err
 	}
 
-	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{})
+	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return err
 	}
-	defer tx.Commit(ctx)
+	defer tx.Rollback(ctx)
 
 	var webhookId int64
-	tx.QueryRow(
+	err = tx.QueryRow(
 		ctx,
-		`INSERT OR REPLACE INTO public.nwc_webhooks (url, user_pubkey, app_pubkey, updated_at)
+		`INSERT INTO public.nwc_webhooks (url, user_pubkey, app_pubkey, updated_at)
 		 VALUES ($1, $2, $3, NOW())
 		 ON CONFLICT (user_pubkey, app_pubkey) DO UPDATE SET url = $1, updated_at = NOW()
 		 RETURNING id`,
@@ -47,79 +49,110 @@ func (s *PgStore) Set(ctx context.Context, webhook Webhook) error {
 		userPubkey,
 		appPubkey,
 	).Scan(&webhookId)
+	if err != nil {
+		return fmt.Errorf("failed to insert/update webhook: %w", err)
+	}
 
 	relays, err := getRelaysByUrl(ctx, tx)
 	if err != nil {
 		return err
 	}
+
 	for _, relayUrl := range webhook.Relays {
 		if _, exists := relays[relayUrl]; exists {
 			continue
 		}
 
 		newRelayId := len(relays) % constant.NWC_MAX_RELAYS_LENGTH
-		tx.Exec(
+		_, err = tx.Exec(
 			ctx,
-			`INSERT OR REPLACE INTO public.nwc_relays (id, url) VALUES ($1, $2)`,
+			`INSERT INTO public.nwc_relays (id, url) 
+             VALUES ($1, $2) 
+             ON CONFLICT (id) DO UPDATE SET url = EXCLUDED.url`,
 			newRelayId, relayUrl,
 		)
-		tx.Exec(
+		if err != nil {
+			return fmt.Errorf("failed to insert relay: %w", err)
+		}
+		_, err = tx.Exec(
 			ctx,
 			`INSERT INTO public.nwc_webhooks_relays (webhook_id, relay_id)
-		 	VALUES ($1, $2) ON CONFLICT DO NOTHING`,
+		 	 VALUES ($1, $2) ON CONFLICT DO NOTHING`,
 			webhookId,
 			newRelayId,
 		)
+		if err != nil {
+			return fmt.Errorf("failed to link webhook and relay: %w", err)
+		}
 		relays[relayUrl] = newRelayId
 	}
-	return nil
+
+	return tx.Commit(ctx)
 }
 
 func (s *PgStore) Get(ctx context.Context, userPubkey string, appPubkey string) (*Webhook, error) {
 	userPubkeyBytes, err := hex.DecodeString(userPubkey)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("invalid user pubkey: %w", err)
 	}
 	appPubkeyBytes, err := hex.DecodeString(appPubkey)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("invalid app pubkey: %w", err)
 	}
 
-	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{})
+	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{AccessMode: pgx.ReadOnly})
 	if err != nil {
 		return nil, err
 	}
-	defer tx.Commit(ctx)
+	defer tx.Rollback(ctx)
 
 	var webhookId int64
 	var url string
 	err = tx.QueryRow(
 		ctx,
-		`SELECT 
-		    nw.id,
-				nw.url
-		 FROM public.nwc_webhooks nw
-		 WHERE nw.user_pubkey = $1 AND nw.app_pubkey = $2`,
+		`SELECT id, url 
+		 FROM public.nwc_webhooks 
+		 WHERE user_pubkey = $1 AND app_pubkey = $2`,
 		userPubkeyBytes,
 		appPubkeyBytes,
 	).Scan(&webhookId, &url)
+
 	if err != nil {
-		return nil, err
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("querying webhook: %w", err)
 	}
 
 	rows, err := tx.Query(
 		ctx,
-		`SELECT 
-		    nr.url,
+		`SELECT nr.url
 		 FROM public.nwc_webhooks_relays nwr
-				LEFT JOIN public.nwc_relays nr ON nwr.relay_id = nr.id
+		 INNER JOIN public.nwc_relays nr ON nwr.relay_id = nr.id
 		 WHERE nwr.webhook_id = $1`,
+		webhookId,
 	)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("querying relays: %w", err)
 	}
 	defer rows.Close()
-	relays := rowsToArray(rows)
+
+	var relays []string
+	for rows.Next() {
+		var relayUrl string
+		if err := rows.Scan(&relayUrl); err != nil {
+			return nil, err
+		}
+		relays = append(relays, relayUrl)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
 
 	return &Webhook{
 		Relays:     relays,
@@ -165,7 +198,7 @@ func (s *PgStore) DeleteExpired(ctx context.Context, before time.Time) error {
 	_, err := s.pool.Exec(
 		ctx,
 		`DELETE FROM public.nwc_webhooks
-		 WHERE updated_at < $1`,
+		 WHERE updated_at < to_timestamp($1)`,
 		beforeUnix)
 	return err
 }

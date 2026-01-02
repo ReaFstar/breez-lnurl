@@ -3,7 +3,6 @@ package nwc
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -110,24 +109,28 @@ func (nm *NostrManager) forwardToNotify() {
 			}
 
 			pTag := incomingEvent.Tags.GetFirst([]string{"p"})
-			userPubkey := pTag.Value()
-			if userPubkey == "" {
+			if pTag == nil {
 				log.Printf("failed to identify user for event %v: no user pubkey provided", incomingEvent.ID)
 				continue
 			}
 
+			userPubkey := pTag.Value()
 			webhook, err := nm.store.Nwc.Get(sub.ctx, userPubkey, incomingEvent.PubKey)
 			if err != nil {
 				log.Printf("failed to retrieve webhook for event %v: %v", incomingEvent.ID, err)
 				continue
 			}
+			if webhook == nil {
+				log.Printf("webhook not found for event %v. Skipping.", incomingEvent.ID)
+				continue
+			}
 
-			go func() {
-				err = nm.SendRequest(sub.ctx, webhook.Url, incomingEvent.ID)
+			go func(url string, id string) {
+				err = nm.SendRequest(sub.ctx, url, id)
 				if err != nil {
 					log.Printf("failed to send webhook message for event %v: %v", incomingEvent.ID, err)
 				}
-			}()
+			}(webhook.Url, incomingEvent.Event.ID)
 		case <-sub.ctx.Done():
 			return
 		case <-nm.ctx.Done():
@@ -147,12 +150,21 @@ func (nm *NostrManager) SendRequest(ctx context.Context, url string, eventId str
 	if err != nil {
 		return err
 	}
-	res, err := http.Post(url, "application/json", strings.NewReader(string(jsonBytes)))
+
+	req, err := http.NewRequestWithContext(ctx, "POST", url, strings.NewReader(string(jsonBytes)))
 	if err != nil {
 		return err
 	}
-	if res.StatusCode != 200 {
-		return errors.New("webhook proxy returned non-200 status code")
+	req.Header.Set("Content-Type", "application/json")
+
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer res.Body.Close()
+
+	if res.StatusCode < 200 || res.StatusCode >= 300 {
+		return fmt.Errorf("webhook returned status: %d", res.StatusCode)
 	}
 	return nil
 }
