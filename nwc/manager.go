@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -22,13 +23,14 @@ type Subscription struct {
 }
 
 type NostrManager struct {
-	pool      *nostr.SimplePool
-	ctx       context.Context
-	cancel    context.CancelFunc
-	mu        sync.RWMutex
-	isRunning bool
-	sub       *Subscription
-	store     *persist.Store
+	pool           *nostr.SimplePool
+	ctx            context.Context
+	cancel         context.CancelFunc
+	mu             sync.RWMutex
+	isRunning      bool
+	sub            *Subscription
+	store          *persist.Store
+	lastAppPubkeys []string
 }
 
 func NewNostrManager(store *persist.Store) *NostrManager {
@@ -38,7 +40,8 @@ func NewNostrManager(store *persist.Store) *NostrManager {
 	}
 }
 
-// The interval to resubscribe to events
+// The interval to check if resubscription is needed
+// Only resubscribe if pubkeys have changed to avoid rate limiting
 var ResubscribeInterval time.Duration = 1 * time.Minute
 
 func (nm *NostrManager) StartResubscriptionLoop() {
@@ -67,12 +70,19 @@ func (nm *NostrManager) Resubscribe() error {
 	if err != nil {
 		return err
 	}
-	relays, err := nm.store.Nwc.GetRelays(nm.ctx)
 
+	// Only resubscribe if we have pubkeys to subscribe to
 	if len(appPubkeys) == 0 {
 		log.Printf("No active app pubkeys. Waiting for registrations...")
 		return nil
 	}
+
+	// Only resubscribe if pubkeys have changed to avoid rate limiting
+	if nm.lastAppPubkeys != nil && slices.Compare(nm.lastAppPubkeys, appPubkeys) == 0 {
+		return nil
+	}
+
+	relays, err := nm.store.Nwc.GetRelays(nm.ctx)
 
 	filters := nostr.Filters{
 		{
@@ -94,6 +104,7 @@ func (nm *NostrManager) Resubscribe() error {
 		prevSub.eventChannel = nil
 	}
 
+	nm.lastAppPubkeys = appPubkeys
 	log.Printf("Resubscribed to %d relays for %d app pubkeys using SimplePool.SubMany", len(relays), len(appPubkeys))
 	return nil
 }
