@@ -23,4 +23,8 @@ type Store interface {
 	GetAppPubkeys(ctx context.Context) ([]string, error)
 	GetRelays(ctx context.Context) ([]string, error)
 	DeleteExpired(ctx context.Context, before time.Time) error
+	// Event deduplication methods
+	IsEventForwarded(ctx context.Context, eventId string) (bool, error)
+	MarkEventForwarded(ctx context.Context, eventId string, userPubkey string, appPubkey string, webhookUrl string) error
+	DeleteOldForwardedEvents(ctx context.Context, before time.Time) error
 }

@@ -69,9 +69,16 @@ func (nm *NostrManager) Resubscribe() error {
 	}
 	relays, err := nm.store.Nwc.GetRelays(nm.ctx)
 
-	filters := nostr.Filters{{
-		Authors: appPubkeys,
-	}}
+	if len(appPubkeys) == 0 {
+		log.Printf("No active app pubkeys. Waiting for registrations...")
+		return nil
+	}
+
+	filters := nostr.Filters{
+		{
+			Authors: appPubkeys,
+		},
+	}
 
 	prevSub := nm.sub
 	subCtx, subCancel := context.WithCancel(nm.ctx)
@@ -87,7 +94,7 @@ func (nm *NostrManager) Resubscribe() error {
 		prevSub.eventChannel = nil
 	}
 
-	log.Printf("Resubscribed to %d relays for %d pubkeys using SimplePool.SubMany", len(relays), len(appPubkeys))
+	log.Printf("Resubscribed to %d relays for %d app pubkeys using SimplePool.SubMany", len(relays), len(appPubkeys))
 	return nil
 }
 
@@ -103,6 +110,8 @@ func (nm *NostrManager) forwardToNotify() {
 			if incomingEvent.Event == nil {
 				return
 			}
+
+			log.Printf("got incoming event: %v", incomingEvent.Event.String())
 			if _, err := incomingEvent.CheckSignature(); err != nil {
 				log.Printf("failed to verify signature for event %v: %v", incomingEvent.ID, err)
 				continue
@@ -115,6 +124,17 @@ func (nm *NostrManager) forwardToNotify() {
 			}
 
 			userPubkey := pTag.Value()
+			// Check if event has already been forwarded (deduplication)
+			alreadyForwarded, err := nm.store.Nwc.IsEventForwarded(sub.ctx, incomingEvent.Event.ID)
+			if err != nil {
+				log.Printf("failed to check if event %v was already forwarded: %v", incomingEvent.ID, err)
+				continue
+			}
+			if alreadyForwarded {
+				log.Printf("event %v already forwarded, skipping duplicate", incomingEvent.ID)
+				continue
+			}
+
 			webhook, err := nm.store.Nwc.Get(sub.ctx, userPubkey, incomingEvent.PubKey)
 			if err != nil {
 				log.Printf("failed to retrieve webhook for event %v: %v", incomingEvent.ID, err)
@@ -125,12 +145,20 @@ func (nm *NostrManager) forwardToNotify() {
 				continue
 			}
 
-			go func(url string, id string) {
+			go func(url string, id string, userPk string, appPk string) {
+				log.Printf("forwarding event %s to notify service", id)
 				err = nm.SendRequest(sub.ctx, url, id)
 				if err != nil {
-					log.Printf("failed to send webhook message for event %v: %v", incomingEvent.ID, err)
+					log.Printf("failed to send webhook message for event %v: %v", id, err)
+					return
 				}
-			}(webhook.Url, incomingEvent.Event.ID)
+
+				// Mark event as forwarded after successful delivery
+				err = nm.store.Nwc.MarkEventForwarded(sub.ctx, id, userPk, appPk, url)
+				if err != nil {
+					log.Printf("failed to mark event %v as forwarded: %v", id, err)
+				}
+			}(webhook.Url, incomingEvent.Event.ID, userPubkey, incomingEvent.PubKey)
 		case <-sub.ctx.Done():
 			return
 		case <-nm.ctx.Done():
@@ -166,6 +194,8 @@ func (nm *NostrManager) SendRequest(ctx context.Context, url string, eventId str
 	if res.StatusCode < 200 || res.StatusCode >= 300 {
 		return fmt.Errorf("webhook returned status: %d", res.StatusCode)
 	}
+
+	log.Printf("successfully forwarded event %s", eventId)
 	return nil
 }
 

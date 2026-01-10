@@ -232,3 +232,58 @@ func rowsToArray(rows pgx.Rows) []string {
 	}
 	return arr
 }
+
+func (s *PgStore) IsEventForwarded(ctx context.Context, eventId string) (bool, error) {
+	var exists bool
+	err := s.pool.QueryRow(
+		ctx,
+		`SELECT EXISTS(SELECT 1 FROM public.nwc_forwarded_events WHERE event_id = $1)`,
+		eventId,
+	).Scan(&exists)
+
+	if err != nil {
+		return false, fmt.Errorf("failed to check if event is forwarded: %w", err)
+	}
+
+	return exists, nil
+}
+
+func (s *PgStore) MarkEventForwarded(ctx context.Context, eventId string, userPubkey string, appPubkey string, webhookUrl string) error {
+	userPubkeyBytes, err := hex.DecodeString(userPubkey)
+	if err != nil {
+		return fmt.Errorf("failed to decode user pubkey: %w", err)
+	}
+
+	appPubkeyBytes, err := hex.DecodeString(appPubkey)
+	if err != nil {
+		return fmt.Errorf("failed to decode app pubkey: %w", err)
+	}
+
+	_, err = s.pool.Exec(
+		ctx,
+		`INSERT INTO public.nwc_forwarded_events (event_id, user_pubkey, app_pubkey, webhook_url, forwarded_at)
+		 VALUES ($1, $2, $3, $4, NOW())
+		 ON CONFLICT (event_id) DO NOTHING`,
+		eventId,
+		userPubkeyBytes,
+		appPubkeyBytes,
+		webhookUrl,
+	)
+
+	if err != nil {
+		return fmt.Errorf("failed to mark event as forwarded: %w", err)
+	}
+
+	return nil
+}
+
+func (s *PgStore) DeleteOldForwardedEvents(ctx context.Context, before time.Time) error {
+	beforeUnix := before.Unix()
+	_, err := s.pool.Exec(
+		ctx,
+		`DELETE FROM public.nwc_forwarded_events
+		 WHERE forwarded_at < to_timestamp($1)`,
+		beforeUnix,
+	)
+	return err
+}

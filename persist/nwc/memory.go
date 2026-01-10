@@ -7,12 +7,14 @@ import (
 )
 
 type MemoryStore struct {
-	webhooks []Webhook
+	webhooks        []Webhook
+	forwardedEvents map[string]bool // eventId -> forwarded
 }
 
 func NewMemoryStore() *MemoryStore {
 	return &MemoryStore{
-		webhooks: []Webhook{},
+		webhooks:        []Webhook{},
+		forwardedEvents: make(map[string]bool),
 	}
 }
 
@@ -68,5 +70,19 @@ func (m *MemoryStore) GetRelays(ctx context.Context) ([]string, error) {
 }
 
 func (m *MemoryStore) DeleteExpired(ctx context.Context, before time.Time) error {
+	return nil
+}
+
+func (m *MemoryStore) IsEventForwarded(ctx context.Context, eventId string) (bool, error) {
+	return m.forwardedEvents[eventId], nil
+}
+
+func (m *MemoryStore) MarkEventForwarded(ctx context.Context, eventId string, userPubkey string, appPubkey string, webhookUrl string) error {
+	m.forwardedEvents[eventId] = true
+	return nil
+}
+
+func (m *MemoryStore) DeleteOldForwardedEvents(ctx context.Context, before time.Time) error {
+	// In-memory implementation doesn't need cleanup as it's temporary
 	return nil
 }
