@@ -20,7 +20,7 @@ func NewMemoryStore() *MemoryStore {
 
 func (m *MemoryStore) Set(ctx context.Context, webhook Webhook) error {
 	for i, hook := range m.webhooks {
-		if hook.Compare(webhook.UserPubkey, webhook.AppPubkey) {
+		if hook.Compare(webhook.WalletServicePubkey, webhook.AppPubkey) {
 			m.webhooks[i] = webhook
 			return nil
 		}
@@ -29,18 +29,18 @@ func (m *MemoryStore) Set(ctx context.Context, webhook Webhook) error {
 	return nil
 }
 
-func (m *MemoryStore) Get(ctx context.Context, userPubkey string, appPubkey string) (*Webhook, error) {
+func (m *MemoryStore) Get(ctx context.Context, walletServicePubkey string, appPubkey string) (*Webhook, error) {
 	for _, hook := range m.webhooks {
-		if hook.Compare(userPubkey, appPubkey) {
+		if hook.Compare(walletServicePubkey, appPubkey) {
 			return &hook, nil
 		}
 	}
 	return nil, fmt.Errorf("Webhook not found")
 }
 
-func (m *MemoryStore) Delete(ctx context.Context, userPubkey string, appPubkey string) error {
+func (m *MemoryStore) Delete(ctx context.Context, walletServicePubkey string, appPubkey string) error {
 	for i, hook := range m.webhooks {
-		if hook.Compare(userPubkey, appPubkey) {
+		if hook.Compare(walletServicePubkey, appPubkey) {
 			m.webhooks = append(m.webhooks[:i], m.webhooks[i+1:]...)
 		}
 	}
@@ -77,7 +77,7 @@ func (m *MemoryStore) IsEventForwarded(ctx context.Context, eventId string) (boo
 	return m.forwardedEvents[eventId], nil
 }
 
-func (m *MemoryStore) MarkEventForwarded(ctx context.Context, eventId string, userPubkey string, appPubkey string, webhookUrl string) error {
+func (m *MemoryStore) MarkEventForwarded(ctx context.Context, eventId string, walletServicePubkey string, appPubkey string, webhookUrl string) error {
 	m.forwardedEvents[eventId] = true
 	return nil
 }

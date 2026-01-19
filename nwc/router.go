@@ -32,15 +32,15 @@ func RegisterNostrEventsRouter(router *mux.Router, rootURL *url.URL, store *pers
 }
 
 type RegisterNostrEventsRequest struct {
-	WebhookUrl string   `json:"webhookUrl"`
-	UserPubkey string   `json:"userPubkey"`
-	AppPubkey  string   `json:"appPubkey"`
-	Relays     []string `json:"relays"`
-	Signature  string   `json:"signature"`
+	WebhookUrl          string   `json:"webhookUrl"`
+	WalletServicePubkey string   `json:"walletServicePubkey"`
+	AppPubkey           string   `json:"appPubkey"`
+	Relays              []string `json:"relays"`
+	Signature           string   `json:"signature"`
 }
 
 func (w *RegisterNostrEventsRequest) Verify(pubkey string) error {
-	messageToVerify := fmt.Sprintf("%v-%v-%v-%v", w.WebhookUrl, w.UserPubkey, w.AppPubkey, w.Relays)
+	messageToVerify := fmt.Sprintf("%v-%v-%v-%v", w.WebhookUrl, w.WalletServicePubkey, w.AppPubkey, w.Relays)
 	verifiedPubkey, err := lightning.VerifyMessage([]byte(messageToVerify), w.Signature)
 	if err != nil {
 		return err
@@ -76,10 +76,10 @@ func (s *NostrEventsRouter) Register(w http.ResponseWriter, r *http.Request) {
 	}
 
 	err := s.store.Nwc.Set(r.Context(), nwc.Webhook{
-		UserPubkey: registerRequest.UserPubkey,
-		Url:        registerRequest.WebhookUrl,
-		AppPubkey:  registerRequest.AppPubkey,
-		Relays:     registerRequest.Relays,
+		WalletServicePubkey: registerRequest.WalletServicePubkey,
+		Url:                 registerRequest.WebhookUrl,
+		AppPubkey:           registerRequest.AppPubkey,
+		Relays:              registerRequest.Relays,
 	})
 	if err != nil {
 		log.Printf("failed to persist nwc details: %v", err)
@@ -87,19 +87,19 @@ func (s *NostrEventsRouter) Register(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	log.Printf("registration added: pubkey:%v\n", registerRequest.UserPubkey)
+	log.Printf("registration added: pubkey:%v\n", registerRequest.WalletServicePubkey)
 	w.Write([]byte("Pubkey registered successfully"))
 }
 
 type UnregisterNostrEventsRequest struct {
-	Time       int64  `json:"time"`
-	UserPubkey string `json:"userPubkey"`
-	AppPubkey  string `json:"appPubkey"`
-	Signature  string `json:"signature"`
+	Time                int64  `json:"time"`
+	WalletServicePubkey string `json:"walletServicePubkey"`
+	AppPubkey           string `json:"appPubkey"`
+	Signature           string `json:"signature"`
 }
 
 func (w *UnregisterNostrEventsRequest) Verify(pubkey string) error {
-	messageToVerify := fmt.Sprintf("%v-%v-%v", w.Time, w.UserPubkey, w.AppPubkey)
+	messageToVerify := fmt.Sprintf("%v-%v-%v", w.Time, w.WalletServicePubkey, w.AppPubkey)
 	verifiedPubkey, err := lightning.VerifyMessage([]byte(messageToVerify), w.Signature)
 	if err != nil {
 		return err
@@ -131,13 +131,13 @@ func (s *NostrEventsRouter) Unregister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err := s.store.Nwc.Delete(r.Context(), req.UserPubkey, req.AppPubkey)
+	err := s.store.Nwc.Delete(r.Context(), req.WalletServicePubkey, req.AppPubkey)
 	if err != nil {
 		log.Printf("failed to delete nwc webhook: %v", err)
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
 
-	log.Printf("registration deleted: pubkey:%v\n", req.UserPubkey)
+	log.Printf("registration deleted: pubkey:%v\n", req.WalletServicePubkey)
 	w.Write([]byte("Pubkey unregistered successfully"))
 }

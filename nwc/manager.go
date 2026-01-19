@@ -130,11 +130,11 @@ func (nm *NostrManager) forwardToNotify() {
 
 			pTag := incomingEvent.Tags.GetFirst([]string{"p"})
 			if pTag == nil {
-				log.Printf("failed to identify user for event %v: no user pubkey provided", incomingEvent.ID)
+				log.Printf("failed to identify user for event %v: no wallet service pubkey provided", incomingEvent.ID)
 				continue
 			}
 
-			userPubkey := pTag.Value()
+			walletServicePubkey := pTag.Value()
 			// Check if event has already been forwarded (deduplication)
 			alreadyForwarded, err := nm.store.Nwc.IsEventForwarded(sub.ctx, incomingEvent.Event.ID)
 			if err != nil {
@@ -146,7 +146,7 @@ func (nm *NostrManager) forwardToNotify() {
 				continue
 			}
 
-			webhook, err := nm.store.Nwc.Get(sub.ctx, userPubkey, incomingEvent.PubKey)
+			webhook, err := nm.store.Nwc.Get(sub.ctx, walletServicePubkey, incomingEvent.PubKey)
 			if err != nil {
 				log.Printf("failed to retrieve webhook for event %v: %v", incomingEvent.ID, err)
 				continue
@@ -156,7 +156,7 @@ func (nm *NostrManager) forwardToNotify() {
 				continue
 			}
 
-			go func(url string, id string, userPk string, appPk string) {
+			go func(url string, id string, walletServicePk string, appPk string) {
 				log.Printf("forwarding event %s to notify service", id)
 				err = nm.SendRequest(sub.ctx, url, id)
 				if err != nil {
@@ -165,11 +165,11 @@ func (nm *NostrManager) forwardToNotify() {
 				}
 
 				// Mark event as forwarded after successful delivery
-				err = nm.store.Nwc.MarkEventForwarded(sub.ctx, id, userPk, appPk, url)
+				err = nm.store.Nwc.MarkEventForwarded(sub.ctx, id, walletServicePk, appPk, url)
 				if err != nil {
 					log.Printf("failed to mark event %v as forwarded: %v", id, err)
 				}
-			}(webhook.Url, incomingEvent.Event.ID, userPubkey, incomingEvent.PubKey)
+			}(webhook.Url, incomingEvent.Event.ID, walletServicePubkey, incomingEvent.PubKey)
 		case <-sub.ctx.Done():
 			return
 		case <-nm.ctx.Done():

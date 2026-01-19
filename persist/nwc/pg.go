@@ -23,7 +23,7 @@ func NewPgStore(pool *pgxpool.Pool) *PgStore {
 }
 
 func (s *PgStore) Set(ctx context.Context, webhook Webhook) error {
-	userPubkey, err := hex.DecodeString(webhook.UserPubkey)
+	walletServicePubkey, err := hex.DecodeString(webhook.WalletServicePubkey)
 	if err != nil {
 		return err
 	}
@@ -41,12 +41,12 @@ func (s *PgStore) Set(ctx context.Context, webhook Webhook) error {
 	var webhookId int64
 	err = tx.QueryRow(
 		ctx,
-		`INSERT INTO public.nwc_webhooks (url, user_pubkey, app_pubkey, updated_at)
+		`INSERT INTO public.nwc_webhooks (url, wallet_service_pubkey, app_pubkey, updated_at)
 		 VALUES ($1, $2, $3, NOW())
-		 ON CONFLICT (user_pubkey, app_pubkey) DO UPDATE SET url = $1, updated_at = NOW()
+		 ON CONFLICT (wallet_service_pubkey, app_pubkey) DO UPDATE SET url = $1, updated_at = NOW()
 		 RETURNING id`,
 		webhook.Url,
-		userPubkey,
+		walletServicePubkey,
 		appPubkey,
 	).Scan(&webhookId)
 	if err != nil {
@@ -90,10 +90,10 @@ func (s *PgStore) Set(ctx context.Context, webhook Webhook) error {
 	return tx.Commit(ctx)
 }
 
-func (s *PgStore) Get(ctx context.Context, userPubkey string, appPubkey string) (*Webhook, error) {
-	userPubkeyBytes, err := hex.DecodeString(userPubkey)
+func (s *PgStore) Get(ctx context.Context, walletServicePubkey string, appPubkey string) (*Webhook, error) {
+	walletServicePubkeyBytes, err := hex.DecodeString(walletServicePubkey)
 	if err != nil {
-		return nil, fmt.Errorf("invalid user pubkey: %w", err)
+		return nil, fmt.Errorf("invalid wallet service pubkey: %w", err)
 	}
 	appPubkeyBytes, err := hex.DecodeString(appPubkey)
 	if err != nil {
@@ -112,8 +112,8 @@ func (s *PgStore) Get(ctx context.Context, userPubkey string, appPubkey string) 
 		ctx,
 		`SELECT id, url 
 		 FROM public.nwc_webhooks 
-		 WHERE user_pubkey = $1 AND app_pubkey = $2`,
-		userPubkeyBytes,
+		 WHERE wallet_service_pubkey = $1 AND app_pubkey = $2`,
+		walletServicePubkeyBytes,
 		appPubkeyBytes,
 	).Scan(&webhookId, &url)
 
@@ -155,18 +155,18 @@ func (s *PgStore) Get(ctx context.Context, userPubkey string, appPubkey string) 
 	}
 
 	return &Webhook{
-		Relays:     relays,
-		AppPubkey:  appPubkey,
-		UserPubkey: userPubkey,
-		Url:        url,
+		Relays:              relays,
+		AppPubkey:           appPubkey,
+		WalletServicePubkey: walletServicePubkey,
+		Url:                 url,
 	}, nil
 }
 
-func (s *PgStore) Delete(ctx context.Context, userPubkey string, appPubkey string) error {
+func (s *PgStore) Delete(ctx context.Context, walletServicePubkey string, appPubkey string) error {
 	_, err := s.pool.Exec(
 		ctx,
-		`DELETE FROM public.nwc_webhooks WHERE user_pubkey = $1 AND app_pubkey = $2`,
-		userPubkey,
+		`DELETE FROM public.nwc_webhooks WHERE wallet_service_pubkey = $1 AND app_pubkey = $2`,
+		walletServicePubkey,
 		appPubkey,
 	)
 	if err != nil {
@@ -248,10 +248,10 @@ func (s *PgStore) IsEventForwarded(ctx context.Context, eventId string) (bool, e
 	return exists, nil
 }
 
-func (s *PgStore) MarkEventForwarded(ctx context.Context, eventId string, userPubkey string, appPubkey string, webhookUrl string) error {
-	userPubkeyBytes, err := hex.DecodeString(userPubkey)
+func (s *PgStore) MarkEventForwarded(ctx context.Context, eventId string, walletServicePubkey string, appPubkey string, webhookUrl string) error {
+	walletServicePubkeyBytes, err := hex.DecodeString(walletServicePubkey)
 	if err != nil {
-		return fmt.Errorf("failed to decode user pubkey: %w", err)
+		return fmt.Errorf("failed to decode wallet service pubkey: %w", err)
 	}
 
 	appPubkeyBytes, err := hex.DecodeString(appPubkey)
@@ -261,11 +261,11 @@ func (s *PgStore) MarkEventForwarded(ctx context.Context, eventId string, userPu
 
 	_, err = s.pool.Exec(
 		ctx,
-		`INSERT INTO public.nwc_forwarded_events (event_id, user_pubkey, app_pubkey, webhook_url, forwarded_at)
+		`INSERT INTO public.nwc_forwarded_events (event_id, wallet_service_pubkey, app_pubkey, webhook_url, forwarded_at)
 		 VALUES ($1, $2, $3, $4, NOW())
 		 ON CONFLICT (event_id) DO NOTHING`,
 		eventId,
-		userPubkeyBytes,
+		walletServicePubkeyBytes,
 		appPubkeyBytes,
 		webhookUrl,
 	)
