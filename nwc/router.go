@@ -27,8 +27,8 @@ func RegisterNostrEventsRouter(router *mux.Router, rootURL *url.URL, store *pers
 		rootURL: rootURL,
 	}
 	NostrEventsRouter.manager.Start()
-	router.HandleFunc("/nwc/{walletPubkey}", NostrEventsRouter.Register).Methods("POST")
-	router.HandleFunc("/nwc/{walletPubkey}", NostrEventsRouter.Unregister).Methods("DELETE")
+	router.HandleFunc("/nwc/{pubkey}", NostrEventsRouter.Register).Methods("POST")
+	router.HandleFunc("/nwc/{pubkey}", NostrEventsRouter.Unregister).Methods("DELETE")
 }
 
 type RegisterNostrEventsRequest struct {
@@ -63,13 +63,13 @@ func (s *NostrEventsRouter) Register(w http.ResponseWriter, r *http.Request) {
 	}
 
 	params := mux.Vars(r)
-	walletPubkey, ok := params["walletPubkey"]
+	pubkey, ok := params["pubkey"]
 	if !ok {
 		http.Error(w, "invalid wallet pubkey", http.StatusBadRequest)
 		return
 	}
 
-	if err := registerRequest.Verify(walletPubkey); err != nil {
+	if err := registerRequest.Verify(pubkey); err != nil {
 		log.Printf("failed to verify registration request: %v", err)
 		http.Error(w, "invalid signature", http.StatusUnauthorized)
 		return
@@ -119,13 +119,13 @@ func (s *NostrEventsRouter) Unregister(w http.ResponseWriter, r *http.Request) {
 	}
 
 	params := mux.Vars(r)
-	walletPubkey, ok := params["walletPubkey"]
+	pubkey, ok := params["pubkey"]
 	if !ok {
 		http.Error(w, "invalid pubkey", http.StatusBadRequest)
 		return
 	}
 
-	if err := req.Verify(walletPubkey); err != nil {
+	if err := req.Verify(pubkey); err != nil {
 		log.Printf("failed to verify registration request: %v", err)
 		http.Error(w, "invalid signature", http.StatusUnauthorized)
 		return
