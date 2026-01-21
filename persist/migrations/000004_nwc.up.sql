@@ -3,7 +3,7 @@ CREATE TABLE public.nwc_webhooks (
   url varchar NOT NULL,
   user_pubkey bytea NOT NULL,
   app_pubkey bytea NOT NULL,
-	updated_at timestamp NOT NULL
+	updated_at bigint NOT NULL
 );
 CREATE INDEX nwc_webhooks_pubkey_idx ON public.nwc_webhooks (user_pubkey);
 CREATE UNIQUE INDEX nwc_webhooks_pubkey_pair ON public.nwc_webhooks (user_pubkey, app_pubkey);
