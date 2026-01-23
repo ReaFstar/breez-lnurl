@@ -3,10 +3,10 @@ package nwc
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"log"
 	"net/http"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -23,13 +23,14 @@ type Subscription struct {
 }
 
 type NostrManager struct {
-	pool      *nostr.SimplePool
-	ctx       context.Context
-	cancel    context.CancelFunc
-	mu        sync.RWMutex
-	isRunning bool
-	sub       *Subscription
-	store     *persist.Store
+	pool           *nostr.SimplePool
+	ctx            context.Context
+	cancel         context.CancelFunc
+	mu             sync.RWMutex
+	isRunning      bool
+	sub            *Subscription
+	store          *persist.Store
+	lastAppPubkeys []string
 }
 
 func NewNostrManager(store *persist.Store) *NostrManager {
@@ -39,7 +40,8 @@ func NewNostrManager(store *persist.Store) *NostrManager {
 	}
 }
 
-// The interval to resubscribe to events
+// The interval to check if resubscription is needed
+// Only resubscribe if pubkeys have changed to avoid rate limiting
 var ResubscribeInterval time.Duration = 1 * time.Minute
 
 func (nm *NostrManager) StartResubscriptionLoop() {
@@ -68,11 +70,25 @@ func (nm *NostrManager) Resubscribe() error {
 	if err != nil {
 		return err
 	}
+
+	// Only resubscribe if we have pubkeys to subscribe to
+	if len(appPubkeys) == 0 {
+		log.Printf("No active app pubkeys. Waiting for registrations...")
+		return nil
+	}
+
+	// Only resubscribe if pubkeys have changed to avoid rate limiting
+	if nm.lastAppPubkeys != nil && slices.Compare(nm.lastAppPubkeys, appPubkeys) == 0 {
+		return nil
+	}
+
 	relays, err := nm.store.Nwc.GetRelays(nm.ctx)
 
-	filters := nostr.Filters{{
-		Authors: appPubkeys,
-	}}
+	filters := nostr.Filters{
+		{
+			Authors: appPubkeys,
+		},
+	}
 
 	prevSub := nm.sub
 	subCtx, subCancel := context.WithCancel(nm.ctx)
@@ -88,7 +104,8 @@ func (nm *NostrManager) Resubscribe() error {
 		prevSub.eventChannel = nil
 	}
 
-	log.Printf("Resubscribed to %d relays for %d pubkeys using SimplePool.SubMany", len(relays), len(appPubkeys))
+	nm.lastAppPubkeys = appPubkeys
+	log.Printf("Resubscribed to %d relays for %d app pubkeys using SimplePool.SubMany", len(relays), len(appPubkeys))
 	return nil
 }
 
@@ -104,30 +121,55 @@ func (nm *NostrManager) forwardToNotify() {
 			if incomingEvent.Event == nil {
 				return
 			}
+
+			log.Printf("got incoming event: %v", incomingEvent.Event.String())
 			if _, err := incomingEvent.CheckSignature(); err != nil {
 				log.Printf("failed to verify signature for event %v: %v", incomingEvent.ID, err)
 				continue
 			}
 
 			pTag := incomingEvent.Tags.GetFirst([]string{"p"})
-			userPubkey := pTag.Value()
-			if userPubkey == "" {
-				log.Printf("failed to identify user for event %v: no user pubkey provided", incomingEvent.ID)
+			if pTag == nil {
+				log.Printf("failed to identify user for event %v: no wallet service pubkey provided", incomingEvent.ID)
 				continue
 			}
 
-			webhook, err := nm.store.Nwc.Get(sub.ctx, userPubkey, incomingEvent.PubKey)
+			walletServicePubkey := pTag.Value()
+			// Check if event has already been forwarded (deduplication)
+			alreadyForwarded, err := nm.store.Nwc.IsEventForwarded(sub.ctx, incomingEvent.Event.ID)
+			if err != nil {
+				log.Printf("failed to check if event %v was already forwarded: %v", incomingEvent.ID, err)
+				continue
+			}
+			if alreadyForwarded {
+				log.Printf("event %v already forwarded, skipping duplicate", incomingEvent.ID)
+				continue
+			}
+
+			webhook, err := nm.store.Nwc.Get(sub.ctx, walletServicePubkey, incomingEvent.PubKey)
 			if err != nil {
 				log.Printf("failed to retrieve webhook for event %v: %v", incomingEvent.ID, err)
 				continue
 			}
+			if webhook == nil {
+				log.Printf("webhook not found for event %v. Skipping.", incomingEvent.ID)
+				continue
+			}
 
-			go func() {
-				err = nm.SendRequest(sub.ctx, webhook.Url, incomingEvent.ID)
+			go func(url string, id string, walletServicePk string, appPk string) {
+				log.Printf("forwarding event %s to notify service", id)
+				err = nm.SendRequest(sub.ctx, url, id)
 				if err != nil {
-					log.Printf("failed to send webhook message for event %v: %v", incomingEvent.ID, err)
+					log.Printf("failed to send webhook message for event %v: %v", id, err)
+					return
 				}
-			}()
+
+				// Mark event as forwarded after successful delivery
+				err = nm.store.Nwc.MarkEventForwarded(sub.ctx, id, walletServicePk, appPk, url)
+				if err != nil {
+					log.Printf("failed to mark event %v as forwarded: %v", id, err)
+				}
+			}(webhook.Url, incomingEvent.Event.ID, walletServicePubkey, incomingEvent.PubKey)
 		case <-sub.ctx.Done():
 			return
 		case <-nm.ctx.Done():
@@ -147,13 +189,24 @@ func (nm *NostrManager) SendRequest(ctx context.Context, url string, eventId str
 	if err != nil {
 		return err
 	}
-	res, err := http.Post(url, "application/json", strings.NewReader(string(jsonBytes)))
+
+	req, err := http.NewRequestWithContext(ctx, "POST", url, strings.NewReader(string(jsonBytes)))
 	if err != nil {
 		return err
 	}
-	if res.StatusCode != 200 {
-		return errors.New("webhook proxy returned non-200 status code")
+	req.Header.Set("Content-Type", "application/json")
+
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
 	}
+	defer res.Body.Close()
+
+	if res.StatusCode < 200 || res.StatusCode >= 300 {
+		return fmt.Errorf("webhook returned status: %d", res.StatusCode)
+	}
+
+	log.Printf("successfully forwarded event %s", eventId)
 	return nil
 }
 
