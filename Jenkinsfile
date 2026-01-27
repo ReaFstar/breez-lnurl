@@ -62,7 +62,8 @@ pipeline {
     post {
         success {
             echo "===== 流水线执行成功！Go项目已部署为Docker容器 ====="
-            echo "容器名：${CONTAINER_NAME} | 镜像名：${DOCKER_IMAGE} | 访问端口：${PORT_MAPPING%:*}"
+            def hostPort = PORT_MAPPING.split(":")[0]
+            echo "容器名：${CONTAINER_NAME} | 镜像名：${DOCKER_IMAGE} | 访问端口：${hostPort}"
         }
         failure {
             echo "===== 流水线执行失败！====="
