@@ -53,7 +53,6 @@ pipeline {
                  '''
 
                  sh 'docker ps | grep ${CONTAINER_NAME}'
-
             }
         }
     }
@@ -75,7 +74,7 @@ pipeline {
         always {
             // echo "清理构建临时文件"
             // sh 'rm -rf ${BUILD_DIR}'
-
+        }
     }
 
 }
