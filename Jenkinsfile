@@ -1,13 +1,13 @@
 pipeline {
     agent any
     environment {
-        DATABASE_URL=credentials('DB_URL') \
-        SERVER_EXTERNAL_URL=credentials('SERVER_URL') \
+        DATABASE_URL=credentials('DB_URL')
+        SERVER_EXTERNAL_URL=credentials('SERVER_URL')
         GITHUB_CREDENTIAL_ID = "github-id"
         APP_NAME = "breez-lnurl"
         DOCKER_IMAGE = "${APP_NAME}:latest"
         CONTAINER_NAME = "${APP_NAME}-container"
-        PORT_MAPPING = "3001:8080"
+        PORT_MAPPING = "4001:8080"
         BUILD_DIR = "./build"  // 专门存放编译产物的目录
     }
 
@@ -15,7 +15,7 @@ pipeline {
     stages {
         stage('拉取代码') {
             steps {
-                git(url: 'https://github.com/ReaFstar/breez-lnurl.git', credentialsId: 'github-token', branch: 'main', changelog: true, poll: false)
+                git(url: 'https://github.com/ReaFstar/breez-lnurl.git', credentialsId: 'github-id', branch: 'main', changelog: true, poll: false)
                 sh 'ls -al && cat go.mod'
             }
         }
@@ -24,7 +24,7 @@ pipeline {
             steps {
                 sh 'mkdir -p ${BUILD_DIR}'
                 sh 'go mod tidy'
-                sh 'CGO_ENABLED=0 GOOS=linux go build -o app ./'
+                sh 'CGO_ENABLED=0 GOOS=linux go build -o ${BUILD_DIR}/app ./'
                 sh 'ls ${BUILD_DIR}/app'
             }
         }
@@ -41,6 +41,8 @@ pipeline {
         stage('启动Docker容器') {
             steps {
                  sh '''
+                    docker stop ${CONTAINER_NAME} || true
+                    docker rm ${CONTAINER_NAME} || true
                      docker run -d \
                          --name ${CONTAINER_NAME} \
                          --restart=always \
@@ -49,6 +51,8 @@ pipeline {
                          -e SERVER_EXTERNAL_URL=${SERVER_EXTERNAL_URL} \
                          ${DOCKER_IMAGE}
                  '''
+
+                 sh 'docker ps | grep ${CONTAINER_NAME}'
 
             }
         }
@@ -65,6 +69,12 @@ pipeline {
             // 失败时打印容器日志，方便排查
             sh "docker logs ${CONTAINER_NAME} || true"
         }
+
+        // 可选：无论成功失败，清理临时资源（根据需求调整）
+        always {
+            // echo "清理构建临时文件"
+            // sh 'rm -rf ${BUILD_DIR}'
+
     }
 
 }
