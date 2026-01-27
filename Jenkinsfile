@@ -11,7 +11,6 @@ pipeline {
         BUILD_DIR = "./build"  // 专门存放编译产物的目录
     }
 
-
     stages {
         stage('拉取代码') {
             steps {
@@ -34,7 +33,6 @@ pipeline {
                  sh 'ls ${BUILD_DIR}/app'
                  sh 'docker build -t ${DOCKER_IMAGE} .'
                  sh 'docker images | grep ${DOCKER_IMAGE}'
-
             }
         }
 
@@ -51,7 +49,6 @@ pipeline {
                          -e SERVER_EXTERNAL_URL=${SERVER_EXTERNAL_URL} \
                          ${DOCKER_IMAGE}
                  '''
-
                  sh 'docker ps | grep ${CONTAINER_NAME}'
             }
         }
@@ -61,19 +58,17 @@ pipeline {
     post {
         success {
             echo "===== 流水线执行成功！Go项目已部署为Docker容器 ====="
-            def hostPort = PORT_MAPPING.split(":")[0]
-            echo "容器名：${CONTAINER_NAME} | 镜像名：${DOCKER_IMAGE} | 访问端口：${hostPort}"
+            sh 'echo "容器名：${CONTAINER_NAME} | 镜像名：${DOCKER_IMAGE} | 访问端口：${PORT_MAPPING%:*}"'
         }
         failure {
             echo "===== 流水线执行失败！====="
             // 失败时打印容器日志，方便排查
             sh "docker logs ${CONTAINER_NAME} || true"
         }
-
         // 可选：无论成功失败，清理临时资源（根据需求调整）
         always {
-            // echo "清理构建临时文件"
-            // sh 'rm -rf ${BUILD_DIR}'
+            echo "清理构建临时文件"
+            sh 'rm -rf ${BUILD_DIR}'
         }
     }
 
