@@ -1,5 +1,9 @@
 pipeline {
     agent any
+    tools {
+        go 'Go 1.24'
+    }
+
     environment {
         DATABASE_URL=credentials('DB_URL')
         SERVER_EXTERNAL_URL=credentials('SERVER_URL')
