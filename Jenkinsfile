@@ -11,7 +11,7 @@ pipeline {
         GITHUB_CREDENTIAL_ID = "github-id"
         APP_NAME = "breez-lnurl"
         // 去掉私有仓库IP，只用本地镜像名
-        DOCKER_IMAGE = "${APP_NAME}:latest"
+        DOCKER_IMAGE = "${APP_NAME}:v1.0"
         NAMESPACE = "lifpay-test"
         PORT = 4001
         BUILD_DIR = "./build"
@@ -45,62 +45,16 @@ pipeline {
         stage('部署到k3s集群') {
             steps {
                  sh '''
-                    # 部署k3s资源，重点改imagePullPolicy为Never（不拉取，只用本地镜像）
-                    kubectl apply -f - <<EOF
-                    apiVersion: apps/v1
-                    kind: Deployment
-                    metadata:
-                      name: ${APP_NAME}
-                      namespace: ${NAMESPACE}
-                    spec:
-                      replicas: 1
-                      selector:
-                        matchLabels:
-                          app: ${APP_NAME}
-                      template:
-                        metadata:
-                          labels:
-                            app: ${APP_NAME}
-                        spec:
-                          containers:
-                            - name: ${APP_NAME}
-                              image: ${DOCKER_IMAGE}
-                              # 关键：设置为Never，k3s不会去远程拉取，只用本地镜像
-                              imagePullPolicy: Never
-                              ports:
-                                - containerPort: ${PORT}
-                              env:
-                                - name: DATABASE_URL
-                                  value: "${DATABASE_URL}"
-                                - name: SERVER_EXTERNAL_URL
-                                  value: "${SERVER_EXTERNAL_URL}"
-                                - name: SERVER_INTERNAL_URL
-                                  value: "http://${APP_NAME}-service:${PORT}"
-                              livenessProbe:
-                                tcpSocket:
-                                  port: ${PORT}
-                                initialDelaySeconds: 10
-                                periodSeconds: 5
-                              readinessProbe:
-                                tcpSocket:
-                                  port: ${PORT}
-                                initialDelaySeconds: 5
-                                periodSeconds: 3
-                    ---
-                    apiVersion: v1
-                    kind: Service
-                    metadata:
-                      name: ${APP_NAME}-service
-                      namespace: ${NAMESPACE}
-                    spec:
-                      type: NodePort
-                      ports:
-                        - port: ${PORT}
-                          targetPort: ${PORT}
-                          nodePort: 30401
-                      selector:
-                        app: ${APP_NAME}
-                    EOF
+                    # 1. 替换deploy.yaml里的占位符（用Jenkins的环境变量）
+                    sed -i "s/__DATABASE_URL__/${DATABASE_URL}/g" deploy.yaml
+                    sed -i "s/__SERVER_EXTERNAL_URL__/${SERVER_EXTERNAL_URL}/g" deploy.yaml
+
+                    # 2. 执行部署（用文件方式，避免内嵌YAML解析问题）
+                    kubectl apply -f deploy.yaml -n lifpay-test
+
+                    # 3. 验证部署
+                    kubectl get pods -n lifpay-test -l app=breez-lnurl
+                    kubectl get svc -n lifpay-test breez-lnurl-service
                  '''
                  // 验证部署
                  sh 'kubectl get pods -n ${NAMESPACE} -l app=${APP_NAME}'

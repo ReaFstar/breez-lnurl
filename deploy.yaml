@@ -1,53 +1,53 @@
+# deploy.yaml（项目根目录）
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: ${APP_NAME}
-  namespace: ${NAMESPACE}
+  name: breez-lnurl
+  namespace: lifpay-test
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: ${APP_NAME}
+      app: breez-lnurl
   template:
     metadata:
       labels:
-        app: ${APP_NAME}
+        app: breez-lnurl
     spec:
       containers:
-        - name: ${APP_NAME}
-          image: ${DOCKER_IMAGE}
-          # 关键：设置为Never，k3s不会去远程拉取，只用本地镜像
+        - name: breez-lnurl
+          image: breez-lnurl:v1.0
           imagePullPolicy: Never
           ports:
-            - containerPort: ${PORT}
+            - containerPort: 4001
           env:
             - name: DATABASE_URL
-              value: "${DATABASE_URL}"
+              value: "__DATABASE_URL__"  # 占位符
             - name: SERVER_EXTERNAL_URL
-              value: "${SERVER_EXTERNAL_URL}"
+              value: "__SERVER_EXTERNAL_URL__"  # 占位符
             - name: SERVER_INTERNAL_URL
-              value: "http://${APP_NAME}-service:${PORT}"
+              value: "http://breez-lnurl-service:4001"
           livenessProbe:
             tcpSocket:
-              port: ${PORT}
+              port: 4001
             initialDelaySeconds: 10
             periodSeconds: 5
           readinessProbe:
             tcpSocket:
-              port: ${PORT}
+              port: 4001
             initialDelaySeconds: 5
             periodSeconds: 3
 ---
 apiVersion: v1
 kind: Service
 metadata:
-  name: ${APP_NAME}-service
-  namespace: ${NAMESPACE}
+  name: breez-lnurl-service
+  namespace: lifpay-test
 spec:
   type: NodePort
   ports:
-    - port: ${PORT}
-      targetPort: ${PORT}
+    - port: 4001
+      targetPort: 4001
       nodePort: 30401
   selector:
-    app: ${APP_NAME}
+    app: breez-lnurl
