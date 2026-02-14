@@ -20,7 +20,7 @@ pipeline {
     stages {
         stage('拉取代码') {
             steps {
-                git(url: 'https://github.com/ReaFstar/breez-lnurl.git', credentialsId: GITHUB_CREDENTIAL_ID, branch: 'main', changelog: true, poll: false)
+                checkout scm
                 sh 'ls -al && cat go.mod'
             }
         }
@@ -46,8 +46,8 @@ pipeline {
             steps {
                  sh '''
                     # 1. 替换deploy.yaml里的占位符（用Jenkins的环境变量）
-                    sed -i "s/__DATABASE_URL__/${DATABASE_URL}/g" deploy.yaml
-                    sed -i "s/__SERVER_EXTERNAL_URL__/${SERVER_EXTERNAL_URL}/g" deploy.yaml
+                    sed -i "s|__DATABASE_URL__|${DATABASE_URL}|g" deploy.yaml
+                    sed -i "s|__SERVER_EXTERNAL_URL__|${SERVER_EXTERNAL_URL}|g" deploy.yaml
 
                     # 2. 执行部署（用文件方式，避免内嵌YAML解析问题）
                     kubectl apply -f deploy.yaml -n lifpay-test
