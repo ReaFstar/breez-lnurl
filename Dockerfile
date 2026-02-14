@@ -16,24 +16,27 @@ COPY . .
 RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o app ./
 
 # 阶段2：运行阶段（使用轻量的alpine镜像，减小镜像体积）
-FROM alpine:3.18
+FROM scratch
 
-# 安装必要的基础工具（可选，如需要日志、调试）
-RUN apk --no-cache add ca-certificates tzdata
+# 从builder阶段复制必要的证书和时区文件（解决HTTPS和时区问题）
+COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
+COPY --from=builder /usr/share/zoneinfo/Asia/Shanghai /usr/share/zoneinfo/Asia/Shanghai
 
 # 设置时区（可选，解决日志时区问题）
 ENV TZ=Asia/Shanghai
 ENV SERVER_EXTERNAL_URL="" \
-    SERVER_INTERNAL_URL=http://172.22.16.8:4001 \
+    SERVER_INTERNAL_URL=http://breez-lnurl-service:4001 \
     DATABASE_URL=""
+
+
+# 创建非root用户（k3s最佳实践，降低权限风险）
+USER 1000:1000
 
 # 创建工作目录
 WORKDIR /app
 
 # 从构建阶段复制编译好的可执行文件到运行阶段
 COPY --from=builder /app/app ./
-
-RUN chmod +x /app/app
 
 # 暴露端口（如果你的Go项目是Web服务，比如3001端口，需对应修改）
 EXPOSE 4001
