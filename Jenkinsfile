@@ -63,29 +63,29 @@ pipeline {
                             app: ${APP_NAME}
                         spec:
                           containers:
-                          - name: ${APP_NAME}
-                            image: ${DOCKER_IMAGE}
-                            # 关键：设置为Never，k3s不会去远程拉取，只用本地镜像
-                            imagePullPolicy: Never
-                            ports:
-                            - containerPort: ${PORT}
-                            env:
-                            - name: DATABASE_URL
-                              value: "${DATABASE_URL}"
-                            - name: SERVER_EXTERNAL_URL
-                              value: "${SERVER_EXTERNAL_URL}"
-                            - name: SERVER_INTERNAL_URL
-                              value: "http://${APP_NAME}-service:${PORT}"
-                            livenessProbe:
-                              tcpSocket:
-                                port: ${PORT}
-                              initialDelaySeconds: 10
-                              periodSeconds: 5
-                            readinessProbe:
-                              tcpSocket:
-                                port: ${PORT}
-                              initialDelaySeconds: 5
-                              periodSeconds: 3
+                            - name: ${APP_NAME}
+                              image: ${DOCKER_IMAGE}
+                              # 关键：设置为Never，k3s不会去远程拉取，只用本地镜像
+                              imagePullPolicy: Never
+                              ports:
+                                - containerPort: ${PORT}
+                              env:
+                                - name: DATABASE_URL
+                                  value: "${DATABASE_URL}"
+                                - name: SERVER_EXTERNAL_URL
+                                  value: "${SERVER_EXTERNAL_URL}"
+                                - name: SERVER_INTERNAL_URL
+                                  value: "http://${APP_NAME}-service:${PORT}"
+                              livenessProbe:
+                                tcpSocket:
+                                  port: ${PORT}
+                                initialDelaySeconds: 10
+                                periodSeconds: 5
+                              readinessProbe:
+                                tcpSocket:
+                                  port: ${PORT}
+                                initialDelaySeconds: 5
+                                periodSeconds: 3
                     ---
                     apiVersion: v1
                     kind: Service
@@ -95,9 +95,9 @@ pipeline {
                     spec:
                       type: NodePort
                       ports:
-                      - port: ${PORT}
-                        targetPort: ${PORT}
-                        nodePort: 30401
+                        - port: ${PORT}
+                          targetPort: ${PORT}
+                          nodePort: 30401
                       selector:
                         app: ${APP_NAME}
                     EOF
